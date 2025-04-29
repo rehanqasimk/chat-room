@@ -1,12 +1,18 @@
 // Import the shared rooms data and helpers
-import { rooms, getUserFromRequest } from './data.js';
+import { rooms, getUserFromRequest, updateRoomsFromClient, getRoomsForClient } from "./data.js";
 
 export default function handler(req, res) {
+  // Try to update rooms from client state first
+  updateRoomsFromClient(req);
+  
   try {
     const query = req.query.query || '';
     
     // Get current user from auth header
     const currentUser = getUserFromRequest(req);
+    
+    // Set header with current rooms data for client-side storage
+    res.setHeader('X-Server-Rooms', getRoomsForClient());
     
     if (!query || query.trim() === '') {
       // If no search query, return all rooms

@@ -1,7 +1,10 @@
 // Import the shared rooms data and helpers
-import { rooms, getUserFromRequest } from './data.js';
+import { rooms, getUserFromRequest, updateRoomsFromClient, getRoomsForClient } from "./data.js";
 
 export default function handler(req, res) {
+  // Try to update rooms from client state first
+  updateRoomsFromClient(req);
+
   const { id } = req.query;
   
   if (!id) {
@@ -22,6 +25,9 @@ export default function handler(req, res) {
     if (room.creator !== currentUser && room.creator !== 'system') {
       return res.status(403).json({ error: 'You can only edit rooms you created' });
     }
+    
+    // Set header with current rooms data for client-side storage
+    res.setHeader('X-Server-Rooms', getRoomsForClient());
     
     // Return the edit form HTML
     const html = `

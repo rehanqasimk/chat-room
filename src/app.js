@@ -8,8 +8,13 @@ let mockDB = {
 function loadFromStorage() {
   const storedRooms = localStorage.getItem('htmx-chat-rooms');
   if (storedRooms) {
-    mockDB.rooms = JSON.parse(storedRooms);
+    try {
+      mockDB.rooms = JSON.parse(storedRooms);
+    } catch (e) {
+      console.error('Error parsing stored rooms:', e);
+    }
   }
+  
   const storedUser = localStorage.getItem('currentUser');
   if (storedUser) {
     try {
@@ -138,8 +143,26 @@ function fetchRooms() {
   roomsList.innerHTML = '<div class="p-6 text-center text-gray-500">Loading chat rooms...</div>';
   
   // Instead of simulating an API call, perform a real fetch
-  fetch('/api/rooms')
+  fetch('/api/rooms', {
+    headers: {
+      'X-Client-Rooms': getBase64EncodedRooms()
+    }
+  })
     .then(response => {
+      // Store rooms data from server response header
+      const serverRooms = response.headers.get('X-Server-Rooms');
+      if (serverRooms) {
+        try {
+          const decodedRooms = JSON.parse(atob(serverRooms));
+          if (Array.isArray(decodedRooms) && decodedRooms.length > 0) {
+            mockDB.rooms = decodedRooms;
+            saveToStorage();
+          }
+        } catch (e) {
+          console.error('Error processing server rooms:', e);
+        }
+      }
+      
       if (!response.ok) {
         throw new Error('Network response was not ok');
       }
@@ -156,6 +179,11 @@ function fetchRooms() {
       console.error('Error fetching rooms:', error);
       roomsList.innerHTML = '<div class="p-6 text-center text-gray-500">Error loading chat rooms. Please try again.</div>';
     });
+}
+
+// Get the base64 encoded rooms for sending to the server
+function getBase64EncodedRooms() {
+  return btoa(JSON.stringify(mockDB.rooms));
 }
 
 // Show a toast notification
@@ -221,6 +249,9 @@ function setupRealEventHandlers() {
           htmx.config.headers = htmx.config.headers || {};
           htmx.config.headers['Authorization'] = `Bearer ${btoa(JSON.stringify({ username: user.username }))}`;
           
+          // Add rooms data header to requests
+          htmx.config.headers['X-Client-Rooms'] = getBase64EncodedRooms();
+          
           // Setup initial room loading
           fetchRooms();
         } catch (e) {
@@ -232,30 +263,19 @@ function setupRealEventHandlers() {
     // When a new room is created or updated
     if ((event.detail.pathInfo.requestPath === '/api/rooms' && event.detail.xhr.status === 201) ||
         (event.detail.pathInfo.requestPath.match(/^\/api\/rooms\/\d+$/) && event.detail.xhr.status === 200)) {
-      // Update local storage with the latest room data
-      fetch('/api/rooms')
-        .then(response => response.text())
-        .then(html => {
-          // Parse room data from HTML (simplified approach)
-          const tempDiv = document.createElement('div');
-          tempDiv.innerHTML = html;
-          const roomItems = tempDiv.querySelectorAll('.room-item');
-          
-          // Extract room data from HTML elements
-          const rooms = Array.from(roomItems).map(item => {
-            return {
-              id: item.dataset.roomId,
-              name: item.querySelector('.room-name').textContent,
-              creator: item.dataset.roomCreator,
-              category: item.querySelector('.room-category').textContent,
-              status: item.querySelector('.room-status').textContent
-            };
-          });
-          
-          // Update mock database and storage
-          mockDB.rooms = rooms;
-          saveToStorage();
-        });
+      // Check for server room data in response headers
+      const serverRooms = event.detail.xhr.getResponseHeader('X-Server-Rooms');
+      if (serverRooms) {
+        try {
+          const decodedRooms = JSON.parse(atob(serverRooms));
+          if (Array.isArray(decodedRooms)) {
+            mockDB.rooms = decodedRooms;
+            saveToStorage();
+          }
+        } catch (e) {
+          console.error('Error processing server rooms:', e);
+        }
+      }
     }
   });
   
@@ -263,21 +283,29 @@ function setupRealEventHandlers() {
   document.body.addEventListener('htmx:afterOnLoad', function(event) {
     if (event.detail.pathInfo.requestPath === '/api/logout' && event.detail.xhr.status === 200) {
       mockDB.currentUser = null;
+      mockDB.rooms = [];
+      saveToStorage();
       
       // Remove authorization header
-      if (htmx.config.headers && htmx.config.headers['Authorization']) {
-        delete htmx.config.headers['Authorization'];
+      if (htmx.config.headers) {
+        if (htmx.config.headers['Authorization']) {
+          delete htmx.config.headers['Authorization'];
+        }
+        if (htmx.config.headers['X-Client-Rooms']) {
+          delete htmx.config.headers['X-Client-Rooms'];
+        }
       }
     }
   });
   
-  // Add auth header to all HTMX requests if user is logged in
+  // Add auth header and rooms data to all HTMX requests if user is logged in
   document.body.addEventListener('htmx:configRequest', function(event) {
     const userJson = localStorage.getItem('currentUser');
     if (userJson && event.detail && event.detail.headers) {
       try {
         const user = JSON.parse(userJson);
         event.detail.headers['Authorization'] = `Bearer ${btoa(JSON.stringify({ username: user.username }))}`;
+        event.detail.headers['X-Client-Rooms'] = getBase64EncodedRooms();
       } catch (e) {
         console.error('Error adding auth header:', e);
       }
@@ -652,6 +680,9 @@ window.addEventListener('load', function() {
       // Add authorization header to HTMX requests
       htmx.config.headers = htmx.config.headers || {};
       htmx.config.headers['Authorization'] = `Bearer ${btoa(JSON.stringify({ username: user.username }))}`;
+      
+      // Add rooms data to HTMX requests
+      htmx.config.headers['X-Client-Rooms'] = getBase64EncodedRooms();
       
       // Load rooms
       fetchRooms();

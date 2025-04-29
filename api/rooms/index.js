@@ -1,7 +1,10 @@
 // Import the shared rooms data and helpers
-import { rooms, getUserFromRequest } from './data.js';
+import { rooms, getUserFromRequest, updateRoomsFromClient, getRoomsForClient } from "./data.js";
 
 export default function handler(req, res) {
+  // Try to update rooms from client state first
+  updateRoomsFromClient(req);
+
   switch (req.method) {
     case 'GET':
       return getRooms(req, res);
@@ -16,6 +19,9 @@ export default function handler(req, res) {
 function getRooms(req, res) {
   try {
     const roomsHtml = rooms.map(room => generateRoomHtml(room, getUserFromRequest(req))).join('');
+    
+    // Set header with current rooms data for client-side storage
+    res.setHeader('X-Server-Rooms', getRoomsForClient());
     
     if (roomsHtml) {
       return res.status(200).send(roomsHtml);
@@ -55,6 +61,9 @@ function createRoom(req, res) {
     
     // Add to our in-memory database
     rooms.push(newRoom);
+    
+    // Set header with updated rooms data for client-side storage
+    res.setHeader('X-Server-Rooms', getRoomsForClient());
     
     // Return HTML for the new room
     const roomHtml = generateRoomHtml(newRoom, creator);

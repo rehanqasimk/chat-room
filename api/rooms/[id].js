@@ -1,7 +1,10 @@
 // Import the shared rooms data and helpers
-import { rooms, getUserFromRequest } from './data.js';
+import { rooms, getUserFromRequest, updateRoomsFromClient, getRoomsForClient } from "./data.js";
 
 export default function handler(req, res) {
+  // Try to update rooms from client state first
+  updateRoomsFromClient(req);
+  
   const { id } = req.query;
   
   if (!id) {
@@ -31,6 +34,9 @@ function getRoom(req, res, id) {
     
     // Get current user from auth header
     const currentUser = getUserFromRequest(req);
+    
+    // Set header with current rooms data for client-side storage
+    res.setHeader('X-Server-Rooms', getRoomsForClient());
     
     // Generate HTML for the room
     const roomHtml = generateRoomHtml(room, currentUser);
@@ -74,6 +80,9 @@ function updateRoom(req, res, id) {
       updatedAt: new Date().toISOString()
     };
     
+    // Set header with updated rooms data for client-side storage
+    res.setHeader('X-Server-Rooms', getRoomsForClient());
+    
     // Generate HTML for the updated room
     const roomHtml = generateRoomHtml(rooms[roomIndex], currentUser);
     return res.status(200).send(roomHtml);
@@ -102,6 +111,9 @@ function deleteRoom(req, res, id) {
     
     // Remove the room
     rooms.splice(roomIndex, 1);
+    
+    // Set header with updated rooms data for client-side storage
+    res.setHeader('X-Server-Rooms', getRoomsForClient());
     
     // Return an empty div that will be removed by HTMX
     return res.status(200).send('');
