@@ -34,6 +34,14 @@ export default function handler(req, res) {
         
         // Clear user info from localStorage
         localStorage.removeItem('currentUser');
+        
+        // Remove authorization header from HTMX requests
+        if (htmx.config.headers && htmx.config.headers['Authorization']) {
+          delete htmx.config.headers['Authorization'];
+        }
+        
+        // Clear the rooms list
+        document.getElementById('rooms-list').innerHTML = '<div class="p-6 text-center text-gray-500">Please login to view chat rooms</div>';
       </script>
     `;
     

@@ -1,13 +1,16 @@
-// Import the shared rooms data
-import { rooms } from './data.js';
+// Import the shared rooms data and helpers
+import { rooms, getUserFromRequest } from './data.js';
 
 export default function handler(req, res) {
   try {
     const category = req.query.category || '';
     
+    // Get current user from auth header
+    const currentUser = getUserFromRequest(req);
+    
     if (!category || category.trim() === '') {
       // If no category filter, return all rooms
-      const allRoomsHtml = rooms.map(room => generateRoomHtml(room)).join('');
+      const allRoomsHtml = rooms.map(room => generateRoomHtml(room, currentUser)).join('');
       
       if (allRoomsHtml) {
         return res.status(200).send(allRoomsHtml);
@@ -20,7 +23,7 @@ export default function handler(req, res) {
     const filteredRooms = rooms.filter(room => room.category === category);
     
     if (filteredRooms.length > 0) {
-      const roomsHtml = filteredRooms.map(room => generateRoomHtml(room)).join('');
+      const roomsHtml = filteredRooms.map(room => generateRoomHtml(room, currentUser)).join('');
       return res.status(200).send(roomsHtml);
     } else {
       return res.status(200).send('<div class="p-6 text-center text-gray-500">No rooms in this category</div>');
@@ -31,8 +34,8 @@ export default function handler(req, res) {
   }
 }
 
-// Helper function to generate room HTML (same as in other files)
-function generateRoomHtml(room) {
+// Helper function to generate room HTML
+function generateRoomHtml(room, currentUser) {
   // Set category class based on room category
   const categoryClasses = {
     general: 'bg-gray-100 text-gray-800',
@@ -42,6 +45,7 @@ function generateRoomHtml(room) {
   };
   
   const categoryClass = categoryClasses[room.category] || categoryClasses.general;
+  const isOwner = currentUser === room.creator || room.creator === 'system';
   
   return `
     <div class="room-item p-6 hover:bg-gray-50 transition duration-200 ease-in-out" data-room-id="${room.id}" data-room-creator="${room.creator}">
@@ -58,25 +62,7 @@ function generateRoomHtml(room) {
             <span class="room-capacity">${room.capacity ? `Max ${room.capacity} participants` : 'Unlimited participants'}</span>
           </div>
         </div>
-        <div class="room-actions space-x-2">
-          <script>
-            // Show edit/delete buttons only if the current user is the creator
-            (function() {
-              try {
-                const userData = localStorage.getItem('currentUser');
-                if (userData) {
-                  const user = JSON.parse(userData);
-                  const roomCreator = "${room.creator}";
-                  
-                  if (user.username === roomCreator || roomCreator === 'system') {
-                    document.currentScript.parentElement.classList.remove('hidden');
-                  }
-                }
-              } catch (e) {
-                console.error('Error checking room ownership:', e);
-              }
-            })();
-          </script>
+        <div class="room-actions ${isOwner ? '' : 'hidden'} space-x-2">
           <button 
             class="edit-btn px-3 py-1 bg-emerald-100 text-emerald-700 rounded-md hover:bg-emerald-200 transition duration-200 ease-in-out"
             hx-get="/api/rooms/${room.id}/edit"

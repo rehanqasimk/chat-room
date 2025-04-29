@@ -1,5 +1,5 @@
-// Import the shared rooms data
-import { rooms } from './data.js';
+// Import the shared rooms data and helpers
+import { rooms, getUserFromRequest } from './data.js';
 
 export default function handler(req, res) {
   switch (req.method) {
@@ -15,7 +15,7 @@ export default function handler(req, res) {
 // GET - List all rooms
 function getRooms(req, res) {
   try {
-    const roomsHtml = rooms.map(room => generateRoomHtml(room)).join('');
+    const roomsHtml = rooms.map(room => generateRoomHtml(room, getUserFromRequest(req))).join('');
     
     if (roomsHtml) {
       return res.status(200).send(roomsHtml);
@@ -38,18 +38,8 @@ function createRoom(req, res) {
       return res.status(400).json({ error: 'Room name is required' });
     }
     
-    // Get current user from header or other source (in a real app)
-    // For demo, we'll extract a username if provided, or use "anonymous"
-    let creator = "anonymous";
-    try {
-      const authHeader = req.headers.authorization;
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        const userData = JSON.parse(Buffer.from(authHeader.split(' ')[1], 'base64').toString());
-        creator = userData.username || "anonymous";
-      }
-    } catch (err) {
-      console.error('Error parsing auth data:', err);
-    }
+    // Get current user from auth header
+    const creator = getUserFromRequest(req) || "anonymous";
     
     // Create a new room
     const newRoom = {
@@ -59,14 +49,15 @@ function createRoom(req, res) {
       capacity: capacity ? parseInt(capacity) : null,
       status: 'active',
       creator,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      participants: 0
     };
     
     // Add to our in-memory database
     rooms.push(newRoom);
     
     // Return HTML for the new room
-    const roomHtml = generateRoomHtml(newRoom);
+    const roomHtml = generateRoomHtml(newRoom, creator);
     return res.status(201).send(roomHtml);
   } catch (error) {
     console.error('Error creating room:', error);
@@ -75,7 +66,7 @@ function createRoom(req, res) {
 }
 
 // Helper function to generate room HTML
-function generateRoomHtml(room) {
+function generateRoomHtml(room, currentUser) {
   // Set category class based on room category
   const categoryClasses = {
     general: 'bg-gray-100 text-gray-800',
@@ -85,6 +76,7 @@ function generateRoomHtml(room) {
   };
   
   const categoryClass = categoryClasses[room.category] || categoryClasses.general;
+  const isOwner = currentUser === room.creator || room.creator === 'system';
   
   return `
     <div class="room-item p-6 hover:bg-gray-50 transition duration-200 ease-in-out" data-room-id="${room.id}" data-room-creator="${room.creator}">
@@ -101,25 +93,7 @@ function generateRoomHtml(room) {
             <span class="room-capacity">${room.capacity ? `Max ${room.capacity} participants` : 'Unlimited participants'}</span>
           </div>
         </div>
-        <div class="room-actions space-x-2">
-          <script>
-            // Show edit/delete buttons only if the current user is the creator
-            (function() {
-              try {
-                const userData = localStorage.getItem('currentUser');
-                if (userData) {
-                  const user = JSON.parse(userData);
-                  const roomCreator = "${room.creator}";
-                  
-                  if (user.username === roomCreator || roomCreator === 'system') {
-                    document.currentScript.parentElement.classList.remove('hidden');
-                  }
-                }
-              } catch (e) {
-                console.error('Error checking room ownership:', e);
-              }
-            })();
-          </script>
+        <div class="room-actions ${isOwner ? '' : 'hidden'} space-x-2">
           <button 
             class="edit-btn px-3 py-1 bg-emerald-100 text-emerald-700 rounded-md hover:bg-emerald-200 transition duration-200 ease-in-out"
             hx-get="/api/rooms/${room.id}/edit"

@@ -10,21 +10,22 @@ function loadFromStorage() {
   if (storedRooms) {
     mockDB.rooms = JSON.parse(storedRooms);
   }
-  const storedUser = localStorage.getItem('htmx-chat-currentUser');
+  const storedUser = localStorage.getItem('currentUser');
   if (storedUser) {
-    mockDB.currentUser = storedUser;
-    renderUserState();
+    try {
+      const userObj = JSON.parse(storedUser);
+      mockDB.currentUser = userObj.username;
+      renderUserState();
+    } catch (e) {
+      console.error('Error parsing user data:', e);
+      localStorage.removeItem('currentUser');
+    }
   }
 }
 
 // Save data to localStorage
 function saveToStorage() {
   localStorage.setItem('htmx-chat-rooms', JSON.stringify(mockDB.rooms));
-  if (mockDB.currentUser) {
-    localStorage.setItem('htmx-chat-currentUser', mockDB.currentUser);
-  } else {
-    localStorage.removeItem('htmx-chat-currentUser');
-  }
 }
 
 // Helper function to create a room item from the template
@@ -94,22 +95,30 @@ function renderUserState() {
   const searchSection = document.getElementById('search-section');
   
   if (mockDB.currentUser) {
-    // Use the template for logged-in state
-    const template = document.getElementById('logged-in-template');
-    const clone = document.importNode(template.content, true);
-    
-    // Update username
-    const usernameElement = clone.getElementById('current-username');
-    usernameElement.textContent = mockDB.currentUser;
+    // Create HTML for logged-in state
+    const html = `
+      <div class="flex items-center justify-between">
+        <div>
+          <span class="font-medium">Logged in as: </span>
+          <span class="text-indigo-600 font-semibold" id="current-username">${mockDB.currentUser}</span>
+        </div>
+        <button 
+          hx-post="/api/logout" 
+          hx-trigger="click" 
+          hx-target="#user-section"
+          class="px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded-md hover:bg-gray-300 transition duration-200 ease-in-out">
+          Logout
+        </button>
+      </div>
+    `;
     
     // Replace content and show create room section
-    userSection.innerHTML = '';
-    userSection.appendChild(clone);
+    userSection.innerHTML = html;
     createRoomSection.classList.remove('hidden');
     searchSection.classList.remove('hidden');
     
-    // Load rooms
-    loadRooms();
+    // Load rooms from server
+    fetchRooms();
   } else {
     // Show login form
     userSection.innerHTML = document.getElementById('login-form').outerHTML;
@@ -122,30 +131,31 @@ function renderUserState() {
   }
 }
 
-// Load all rooms
-function loadRooms() {
+// Fetch rooms from server
+function fetchRooms() {
+  // Show loading state
   const roomsList = document.getElementById('rooms-list');
-  roomsList.innerHTML = '';
+  roomsList.innerHTML = '<div class="p-6 text-center text-gray-500">Loading chat rooms...</div>';
   
-  if (mockDB.rooms.length === 0) {
-    roomsList.innerHTML = '<div class="p-6 text-center text-gray-500">No chat rooms available. Create one!</div>';
-    return;
-  }
-  
-  mockDB.rooms.forEach(room => {
-    const roomElement = createRoomElement(room);
-    roomsList.appendChild(roomElement);
-  });
-}
-
-// Filter rooms by search term and category
-function filterRooms(searchTerm = '', category = '') {
-  return mockDB.rooms.filter(room => {
-    const matchesSearch = searchTerm === '' || 
-      room.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = category === '' || room.category === category;
-    return matchesSearch && matchesCategory;
-  });
+  // Instead of simulating an API call, perform a real fetch
+  fetch('/api/rooms')
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok');
+      }
+      return response.text();
+    })
+    .then(html => {
+      if (html && html.trim() !== '') {
+        roomsList.innerHTML = html;
+      } else {
+        roomsList.innerHTML = '<div class="p-6 text-center text-gray-500">No chat rooms available. Create one!</div>';
+      }
+    })
+    .catch(error => {
+      console.error('Error fetching rooms:', error);
+      roomsList.innerHTML = '<div class="p-6 text-center text-gray-500">Error loading chat rooms. Please try again.</div>';
+    });
 }
 
 // Show a toast notification
@@ -176,11 +186,107 @@ function showToast(message, type = 'info') {
 // Initialize the app
 function init() {
   loadFromStorage();
-  setupEventHandlers();
+  
+  // Only add custom event handlers if we're in development mode
+  // (when real API endpoints aren't available)
+  const isDevMode = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  
+  if (isDevMode) {
+    setupMockEventHandlers();
+  } else {
+    setupRealEventHandlers();
+  }
+  
+  // If user is logged in, setup auth headers for API calls
+  if (mockDB.currentUser) {
+    const createRoomSection = document.getElementById('create-room-section');
+    const searchSection = document.getElementById('search-section');
+    createRoomSection.classList.remove('hidden');
+    searchSection.classList.remove('hidden');
+  }
 }
 
-// Setup HTMX event handlers for our mock API
-function setupEventHandlers() {
+// Setup real event handlers for production environment
+function setupRealEventHandlers() {
+  // When login is complete
+  document.body.addEventListener('htmx:afterOnLoad', function(event) {
+    if (event.detail.pathInfo.requestPath === '/api/login' && event.detail.xhr.status === 200) {
+      const userJson = localStorage.getItem('currentUser');
+      if (userJson) {
+        try {
+          const user = JSON.parse(userJson);
+          mockDB.currentUser = user.username;
+          
+          // Add authorization header to future requests
+          htmx.config.headers = htmx.config.headers || {};
+          htmx.config.headers['Authorization'] = `Bearer ${btoa(JSON.stringify({ username: user.username }))}`;
+          
+          // Setup initial room loading
+          fetchRooms();
+        } catch (e) {
+          console.error('Error parsing user data:', e);
+        }
+      }
+    }
+    
+    // When a new room is created or updated
+    if ((event.detail.pathInfo.requestPath === '/api/rooms' && event.detail.xhr.status === 201) ||
+        (event.detail.pathInfo.requestPath.match(/^\/api\/rooms\/\d+$/) && event.detail.xhr.status === 200)) {
+      // Update local storage with the latest room data
+      fetch('/api/rooms')
+        .then(response => response.text())
+        .then(html => {
+          // Parse room data from HTML (simplified approach)
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = html;
+          const roomItems = tempDiv.querySelectorAll('.room-item');
+          
+          // Extract room data from HTML elements
+          const rooms = Array.from(roomItems).map(item => {
+            return {
+              id: item.dataset.roomId,
+              name: item.querySelector('.room-name').textContent,
+              creator: item.dataset.roomCreator,
+              category: item.querySelector('.room-category').textContent,
+              status: item.querySelector('.room-status').textContent
+            };
+          });
+          
+          // Update mock database and storage
+          mockDB.rooms = rooms;
+          saveToStorage();
+        });
+    }
+  });
+  
+  // When logout happens
+  document.body.addEventListener('htmx:afterOnLoad', function(event) {
+    if (event.detail.pathInfo.requestPath === '/api/logout' && event.detail.xhr.status === 200) {
+      mockDB.currentUser = null;
+      
+      // Remove authorization header
+      if (htmx.config.headers && htmx.config.headers['Authorization']) {
+        delete htmx.config.headers['Authorization'];
+      }
+    }
+  });
+  
+  // Add auth header to all HTMX requests if user is logged in
+  document.body.addEventListener('htmx:configRequest', function(event) {
+    const userJson = localStorage.getItem('currentUser');
+    if (userJson && event.detail && event.detail.headers) {
+      try {
+        const user = JSON.parse(userJson);
+        event.detail.headers['Authorization'] = `Bearer ${btoa(JSON.stringify({ username: user.username }))}`;
+      } catch (e) {
+        console.error('Error adding auth header:', e);
+      }
+    }
+  });
+}
+
+// Setup event handlers for local development
+function setupMockEventHandlers() {
   // Login handler
   htmx.on('htmx:beforeRequest', (event) => {
     if (event.detail.requestConfig.path === '/api/login') {
@@ -510,3 +616,48 @@ function setupEventHandlers() {
 
 // Initialize the app when the DOM is loaded
 document.addEventListener('DOMContentLoaded', init);
+
+// Check login status when page loads and restore session if needed
+window.addEventListener('load', function() {
+  const userJson = localStorage.getItem('currentUser');
+  if (userJson) {
+    try {
+      const user = JSON.parse(userJson);
+      mockDB.currentUser = user.username;
+      
+      // Render user state
+      const userSection = document.getElementById('user-section');
+      userSection.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="font-medium">Logged in as: </span>
+            <span class="text-indigo-600 font-semibold" id="current-username">${user.username}</span>
+          </div>
+          <button 
+            hx-post="/api/logout" 
+            hx-trigger="click" 
+            hx-target="#user-section"
+            class="px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded-md hover:bg-gray-300 transition duration-200 ease-in-out">
+            Logout
+          </button>
+        </div>
+      `;
+      
+      // Show relevant sections
+      const createRoomSection = document.getElementById('create-room-section');
+      const searchSection = document.getElementById('search-section');
+      createRoomSection.classList.remove('hidden');
+      searchSection.classList.remove('hidden');
+      
+      // Add authorization header to HTMX requests
+      htmx.config.headers = htmx.config.headers || {};
+      htmx.config.headers['Authorization'] = `Bearer ${btoa(JSON.stringify({ username: user.username }))}`;
+      
+      // Load rooms
+      fetchRooms();
+    } catch (e) {
+      console.error('Error restoring session:', e);
+      localStorage.removeItem('currentUser');
+    }
+  }
+});

@@ -1,5 +1,5 @@
-// Import the shared rooms data
-import { rooms } from './data.js';
+// Import the shared rooms data and helpers
+import { rooms, getUserFromRequest } from './data.js';
 
 export default function handler(req, res) {
   const { id } = req.query;
@@ -13,6 +13,14 @@ export default function handler(req, res) {
     
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
+    }
+    
+    // Get current user from auth header
+    const currentUser = getUserFromRequest(req);
+    
+    // Check if user is authorized to edit this room
+    if (room.creator !== currentUser && room.creator !== 'system') {
+      return res.status(403).json({ error: 'You can only edit rooms you created' });
     }
     
     // Return the edit form HTML

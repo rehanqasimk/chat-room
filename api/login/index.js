@@ -44,6 +44,20 @@ export default function handler(req, res) {
         
         // Store user info in localStorage
         localStorage.setItem('currentUser', JSON.stringify(${JSON.stringify(user)}));
+        
+        // Add authorization header to HTMX requests
+        htmx.config.headers = htmx.config.headers || {};
+        htmx.config.headers['Authorization'] = 'Bearer ' + btoa(JSON.stringify(${JSON.stringify(user)}));
+        
+        // Load rooms automatically
+        fetch('/api/rooms')
+          .then(response => response.text())
+          .then(html => {
+            document.getElementById('rooms-list').innerHTML = html || '<div class="p-6 text-center text-gray-500">No chat rooms available. Create one!</div>';
+          })
+          .catch(error => {
+            console.error('Error loading rooms:', error);
+          });
       </script>
     `;
     
